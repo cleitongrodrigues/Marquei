@@ -1,0 +1,6 @@
+@Marquei.API_HostAddress = http://localhost:5133
+
+GET {{Marquei.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
