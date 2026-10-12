@@ -14,11 +14,13 @@ public class Appointment : Entity
     public DateTime EndUtc { get; private set; }
     public AppointmentStatus Status { get; private set; }
     public DateTime? PaymentExpiresAtUtc { get; private set; }
+    public Money DepositAmount { get; private set; } = Money.Zero;
 
     public IReadOnlyCollection<AppointmentItem> Items => _items.AsReadOnly();
 
     public Money TotalPrice =>
         _items.Aggregate(Money.Zero, (total, item) => total.Add(item.Price));
+    public Money RemainingAmount => TotalPrice.Subtract(DepositAmount);
 
     private Appointment()
     {
@@ -29,6 +31,7 @@ public class Appointment : Entity
         Guid clientId,
         DateTime startUtc,
         IReadOnlyCollection<Service> services,
+        decimal depositPercent,
         TimeSpan paymentWindow,
         DateTime nowUtc)
     {
@@ -43,6 +46,9 @@ public class Appointment : Entity
 
         if (services.Any(s => !s.IsActive))
             throw new DomainException("Um dos serviços não está disponível para agendamento.");
+
+        if (depositPercent is <= 0 or > 100)
+            throw new DomainException("O percentual do sinal deve ser maior que 0 e no máximo 100.");
 
         var appointment = new Appointment
         {
@@ -60,6 +66,7 @@ public class Appointment : Entity
             appointment._items.Sum(i => i.Duration.Ticks));
 
         appointment.EndUtc = startUtc + totalDuration;
+        appointment.DepositAmount = appointment.TotalPrice.Percentage(depositPercent);
 
         return appointment;
     }

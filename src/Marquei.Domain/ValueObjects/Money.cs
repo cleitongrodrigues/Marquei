@@ -30,4 +30,11 @@ public sealed record Money
 
         return Create(Amount * percent / 100);
     }
+    public Money Subtract(Money other)
+    {
+        if (other.Amount > Amount)
+            throw new DomainException("O valor a subtrair é maior que o valor total.");
+
+        return Create(Amount - other.Amount);
+    }
 }
