@@ -1,41 +1,68 @@
+using Marquei.Application.Abstractions.Messaging;
+using Marquei.Application.Tenants.CreateTenant;
+using Marquei.Application.Tenants.GetTenantBySlug;
+using Marquei.Domain.Common;
+using Marquei.Domain.Tenants;
+using Marquei.Infra.Persistence;
+using Marquei.Infra.Persistence.Repositories;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+
+builder.Services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<AppDbContext>());
+builder.Services.AddScoped<ITenantRepository, TenantRepository>();
+
+builder.Services.AddScoped<
+    ICommandHandler<CreateTenantCommand, Guid>,
+    CreateTenantCommandHandler>();
+
+builder.Services.AddScoped<
+    IQueryHandler<GetTenantBySlugQuery, TenantPublicDto?>,
+    GetTenantBySlugQueryHandler>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
+app.Use(async (context, next) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    try
+    {
+        await next();
+    }
+    catch (DomainException ex)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new { error = ex.Message });
+    }
+});
 
-app.MapGet("/weatherforecast", () =>
+app.MapPost("/tenants", async (
+    CreateTenantRequest request,
+    ICommandHandler<CreateTenantCommand, Guid> handler) =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    var id = await handler.HandleAsync(
+        new CreateTenantCommand(request.Name, request.Slug));
+
+    return Results.Created($"/tenants/{request.Slug}", new { id });
+});
+
+app.MapGet("/tenants/{slug}", async (
+    string slug,
+    IQueryHandler<GetTenantBySlugQuery, TenantPublicDto?> handler) =>
+{
+    var tenant = await handler.HandleAsync(new GetTenantBySlugQuery(slug));
+    return tenant is null ? Results.NotFound() : Results.Ok(tenant);
+});
 
 app.Run();
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+public record CreateTenantRequest(string Name, string Slug);
