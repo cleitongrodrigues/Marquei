@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: marquei-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: marquei
+      POSTGRES_PASSWORD: marquei_dev
+      POSTGRES_DB: marquei
+    ports:
+      - "5432:5432"
+    volumes:
+      - marquei-data:/var/lib/postgresql/data
+
+volumes:
+  marquei-data:
