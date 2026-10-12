@@ -1,15 +1,24 @@
 using Marquei.Domain.Common;
+using Marquei.Domain.Services;
+using Marquei.Domain.ValueObjects;
 
 namespace Marquei.Domain.Appointments;
 
 public class Appointment : Entity
 {
+    private readonly List<AppointmentItem> _items = new();
+
     public Guid TenantId { get; private set; }
     public Guid ClientId { get; private set; }
     public DateTime StartUtc { get; private set; }
     public DateTime EndUtc { get; private set; }
     public AppointmentStatus Status { get; private set; }
     public DateTime? PaymentExpiresAtUtc { get; private set; }
+
+    public IReadOnlyCollection<AppointmentItem> Items => _items.AsReadOnly();
+
+    public Money TotalPrice =>
+        _items.Aggregate(Money.Zero, (total, item) => total.Add(item.Price));
 
     private Appointment()
     {
@@ -19,25 +28,40 @@ public class Appointment : Entity
         Guid tenantId,
         Guid clientId,
         DateTime startUtc,
-        TimeSpan duration,
+        IReadOnlyCollection<Service> services,
         TimeSpan paymentWindow,
         DateTime nowUtc)
     {
         if (startUtc <= nowUtc)
             throw new DomainException("O horário precisa estar no futuro.");
 
-        if (duration <= TimeSpan.Zero)
-            throw new DomainException("A duração precisa ser maior que zero.");
+        if (services.Count == 0)
+            throw new DomainException("Escolha pelo menos um serviço.");
 
-        return new Appointment
+        if (services.Any(s => s.TenantId != tenantId))
+            throw new DomainException("Serviço não pertence a este salão.");
+
+        if (services.Any(s => !s.IsActive))
+            throw new DomainException("Um dos serviços não está disponível para agendamento.");
+
+        var appointment = new Appointment
         {
             TenantId = tenantId,
             ClientId = clientId,
             StartUtc = startUtc,
-            EndUtc = startUtc + duration,
             Status = AppointmentStatus.PendingPayment,
             PaymentExpiresAtUtc = nowUtc + paymentWindow
         };
+
+        foreach (var service in services)
+            appointment._items.Add(AppointmentItem.FromService(service));
+
+        var totalDuration = TimeSpan.FromTicks(
+            appointment._items.Sum(i => i.Duration.Ticks));
+
+        appointment.EndUtc = startUtc + totalDuration;
+
+        return appointment;
     }
 
     public void ConfirmPayment(DateTime nowUtc)
